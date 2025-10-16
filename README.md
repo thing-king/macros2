@@ -1,8 +1,5 @@
 # macros2
-A runtime macro system for Nim with FFI support for exporting and importing macros across dynamic libraries.
-This project is a fork of [`elcritch/cdecl`](https://github.com/elcritch/cdecl/tree/main/src/cdecl/compiler) — all credit for the original design and implementation goes to @elcritch.
-## What is macros2?
-`macros2` provides a `NimNode` type that can be used at **runtime** instead of just at compile-time. This enables runtime macro evaluation, macro FFI across shared library boundaries, and runtime macro caching.
+An expansion of [`elcritch/cdecl`](https://github.com/elcritch/cdecl/tree/main/src/cdecl/compiler) adding macro FFI capabilities for exporting and importing macros across dynamic library boundaries. This enables runtime macro composition, source code protection, and macro bootstrapping. Original design and implementation by [`@elcritch`](https://github.com/elcritch/cdecl/tree/main/src/cdecl/compiler)
 
 ## Limitations
 > [!WARNING]  
@@ -57,7 +54,7 @@ This creates a seamless bridge where AST nodes are serialized to strings at the 
 
 # Motivation
 The macro FFI system addresses two key use cases:
-## A. Source Code Protection
+### A. Source Code Protection
 Distribute macro implementations as compiled libraries without exposing the source code. This allows proprietary macro logic to be shipped while maintaining the same API surface as source-distributed macros.
-## B. Macro Bootstrapping
+### B. Macro Bootstrapping
 Build self-extensible macro systems where macros can generate, transform, and compose other macros across compilation boundaries. This enables incremental development of sophisticated metaprogramming frameworks — foundational macros in one library can be used to construct higher-level abstractions in dependent libraries, with each layer building upon the runtime capabilities of the previous. The result is a composable macro ecosystem where complex transformations emerge from simpler, reusable primitives.
