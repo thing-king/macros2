@@ -57,4 +57,6 @@ The macro FFI system addresses two key use cases:
 ### A. Source Code Protection
 Distribute macro implementations as compiled libraries without exposing the source code. This allows proprietary macro logic to be shipped while maintaining the same API surface as source-distributed macros.
 ### B. Macro Bootstrapping
-Build self-extensible macro systems where macros can generate, transform, and compose other macros across compilation boundaries. This enables incremental development of sophisticated metaprogramming frameworks — foundational macros in one library can be used to construct higher-level abstractions in dependent libraries, with each layer building upon the runtime capabilities of the previous. The result is a composable macro ecosystem where complex transformations emerge from simpler, reusable primitives.
+`macros2` enables self-extensible macro systems where macros can load, generate, and compose other macros across compilation boundaries.
+This allows a framework (like Thing) to bootstrap itself: foundational macros can be compiled and reused as binary libraries while higher-level macros dynamically import and extend them.
+Each layer builds on the runtime FFI, enabling iterative growth of a macro ecosystem without needing full recompilation or source inclusion.
