@@ -4,10 +4,24 @@ import strutils
 
 # TODO:  implement line info
 macro error*(args: varargs[untyped]): untyped =
+  # add repr of all args togehter
+  # var strs: seq[string] = @[]
+  # for a in args:
+  #   strs.add(a.repr)
+  
+
+  var error = macros.newTree(macros.nnkInfix,
+    macros.ident("&"),
+    macros.newStrLitNode("[Macros2] ERROR: "),
+  )
+  error.add(args[0])
+  if args.len > 2:
+    macros.error "error macro only accepts one or two arguments", args[0]
+
   result = macros.newTree(macros.nnkStmtList,
     macros.newTree(macros.nnkCall,
       macros.ident("echo"),
-      macros.newStrLitNode("ERROR!")
+      error
     ),
     macros.newTree(macros.nnkCall,
       macros.ident("quit"),
