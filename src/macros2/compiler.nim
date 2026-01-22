@@ -61,3 +61,6 @@ proc parseStmt*(s: string): Node =
   
   # # Store the repr using the compiler's renderer
   # result.repr = repr(nimNode)
+
+proc parseCode*(s: string): Node =
+  result = parseStmt(s)

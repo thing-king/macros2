@@ -46,14 +46,20 @@ proc toNimNode*(n: Node): NimNode =
       of nkCommentStmt:
         result = macros.newCommentStmtNode(n.strVal)
       of nkIdent:
-        result = macros.ident(n.strVal)
+        # Special case: _ is a discard identifier, extract from parsed statement
+        if n.strVal == "_":
+          let stmt = macros.parseStmt("discard _")
+          result = stmt[0][0].copyNimTree()  # Extract the Ident "_" from "discard _"
+        else:
+          result = macros.ident(n.strVal)
       of nkSym:
         result = macros.ident(n.strVal)
       else:
         result = macros.newNimNode(n.kind.toNimNodeKind())
         result.strVal = n.strVal
     of INT_LITERALS:
-      result = macros.newLit(n.intVal)
+      result = macros.newNimNode(n.kind.toNimNodeKind())
+      result.intVal = n.intVal
     of FLOAT_LITERALS:
       result = macros.newLit(n.floatVal)
     of CAN_HAVE_CHILDREN:

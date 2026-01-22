@@ -1,6 +1,7 @@
 import core
 import macros
 import strutils
+import pkg/colors
 
 # TODO:  implement line info
 macro error*(args: varargs[untyped]): untyped =
@@ -12,7 +13,7 @@ macro error*(args: varargs[untyped]): untyped =
 
   var error = macros.newTree(macros.nnkInfix,
     macros.ident("&"),
-    macros.newStrLitNode("[Macros2] ERROR: "),
+    macros.newStrLitNode("\nAn error occured...".red & "\n\n"),
   )
   error.add(args[0])
   if args.len > 2:

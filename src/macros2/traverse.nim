@@ -1,6 +1,5 @@
 import macros, strutils
 
-import pkg/debug
 import pkg/colors
 
 macro traverseNode*(nodeIdent, astBody, iteratorName, skipKinds: untyped, 
