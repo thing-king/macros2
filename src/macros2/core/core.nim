@@ -70,9 +70,9 @@ type
     nkError,  ## erroneous AST node
     nkModuleRef, nkReplayAction, nkNilRodNode ## internal IC nodes
     nkOpenSym
-func toNodeKind*(nnk: NimNodeKind): NodeKind =
+proc toNodeKind*(nnk: NimNodeKind): NodeKind =
   NodeKind(ord(nnk))
-func toNimNodeKind*(nk: NodeKind): NimNodeKind =
+proc toNimNodeKind*(nk: NodeKind): NimNodeKind =
   NimNodeKind(ord(nk))
 
 type
@@ -95,9 +95,9 @@ type
     ntBuiltintpeClass, ntUserTypeClass, ntUserTypeClassInst,
     ntCompositeTypeClass, ntInferred, ntAnd, ntOr, ntNot,
     ntAnything, ntStatic, ntFromExpr, ntOptDeprecated, ntVoid
-func toTypeKind*(tk: NimTypeKind): NodeTypeKind =
+proc toTypeKind*(tk: NimTypeKind): NodeTypeKind =
   NodeTypeKind(ord(tk))
-func toNimTypeKind*(tk: NodeTypeKind): NimTypeKind =
+proc toNimTypeKind*(tk: NodeTypeKind): NimTypeKind =
   NimTypeKind(ord(tk))
 
 type
@@ -109,9 +109,9 @@ type
     nsConverter, nsMacro, nsTemplate, nsField,
     nsEnumField, nsForVar, nsLabel,
     nsStub
-func toSymKind*(sk: NimSymKind): NodeSymKind =
+proc toSymKind*(sk: NimSymKind): NodeSymKind =
   NodeSymKind(ord(sk))
-func toNimSymKind*(sk: NodeSymKind): NimSymKind =
+proc toNimSymKind*(sk: NodeSymKind): NimSymKind =
   NimSymKind(ord(sk))
 
 const
@@ -413,7 +413,7 @@ when declared(float128):
     result.floatVal = f
 
 # import pkg/lifter
-func newLit*(arg: static[enum]): Node =
+proc newLit*(arg: static[enum]): Node =
   newCall(
     bindSym($typeof(arg)),
     newLit(ord(arg))
@@ -1218,16 +1218,39 @@ proc parseHook*(s: string, i: var int, v: var Node) =
     discard
 
 
+proc escapeChar(c: char): string =
+  ## Escape a character for use in a Nim char or string literal.
+  case c
+  of '\\': result = "\\\\"
+  of '"': result = "\\\""
+  of '\'': result = "\\'"
+  of '\n': result = "\\n"
+  of '\r': result = "\\r"
+  of '\t': result = "\\t"
+  of '\x00'..'\x08', '\x0B', '\x0C', '\x0E'..'\x1F', '\x7F':
+    # Other control characters as hex escapes
+    result = "\\x" & toHex(ord(c), 2).toLowerAscii()
+  else: result = $c
+
+proc escapeStrLit(s: string): string =
+  ## Escape a string for use in a Nim string literal.
+  ## Converts special characters back to their escape sequences.
+  result = ""
+  for c in s:
+    case c
+    of '\'': result.add c  # Single quotes don't need escaping in strings
+    else: result.add escapeChar(c)
+
 proc repr*(n: Node, indent: int = 0): string =
   ## Generate the Nim code representation of a Node with proper indentation.
   ## Converts AST back to source code through recursion.
-  ## 
+  ##
   ## Args:
   ##   n: The node to represent
   ##   indent: Current indentation level (number of spaces)
-  
+
   let ind = "  ".repeat(indent)  # Current line indentation
-  
+
   case n.kind
   # ============================================================
   # LITERALS
@@ -1242,17 +1265,29 @@ proc repr*(n: Node, indent: int = 0): string =
   of nkFloatLit, nkFloat32Lit, nkFloat64Lit, nkFloat128Lit:
     result = $n.floatVal
   
+
   of nkStrLit, nkRStrLit, nkTripleStrLit:
-    result = "\"" & n.strVal & "\""
+    result = "\"" & escapeStrLit(n.strVal) & "\""
   
   of nkCharLit:
-    result = "'" & $char(n.intVal) & "'"
+    result = "'" & escapeChar(char(n.intVal)) & "'"
   
   of nkIdent, nkSym:
     result = n.strVal
-  
+
+  of nkAccQuoted:
+    # Backtick-quoted identifiers like `[]` or `+`
+    result = "`"
+    for i in 0..<n.len:
+      result.add repr(n[i], indent)
+    result.add "`"
+
   of nkCommentStmt:
-    result = "# " & n.strVal
+    # Prefix each line with #
+    let lines = n.strVal.split('\n')
+    for i, line in lines:
+      if i > 0: result.add "\n"
+      result.add "# " & line
   
   of nkEmpty:
     result = ""
@@ -1262,7 +1297,13 @@ proc repr*(n: Node, indent: int = 0): string =
   # ============================================================
   of nkPrefix:
     if n.len >= 2:
-      result = repr(n[0], indent) & repr(n[1], indent)
+      let op = repr(n[0], indent)
+      let operand = repr(n[1], indent)
+      # Add space for word operators like 'not', 'addr', etc.
+      if op.len > 0 and op[0] in {'a'..'z', 'A'..'Z'}:
+        result = op & " " & operand
+      else:
+        result = op & operand
   
   of nkPostfix:
     if n.len >= 2:
@@ -1275,15 +1316,23 @@ proc repr*(n: Node, indent: int = 0): string =
   # ============================================================
   # CALLS AND ACCESS
   # ============================================================
-  of nkCall, nkCommand:
+  of nkCall:
+    if n.len > 0:
+      result = repr(n[0], indent)
+      result.add "("
+      for i in 1..<n.len:
+        if i > 1: result.add ", "
+        result.add repr(n[i], indent)
+      result.add ")"
+
+  of nkCommand:
     if n.len > 0:
       result = repr(n[0], indent)
       if n.len > 1:
-        result.add "("
+        result.add " "
         for i in 1..<n.len:
           if i > 1: result.add ", "
           result.add repr(n[i], indent)
-        result.add ")"
   
   of nkDotExpr:
     if n.len >= 2:
@@ -1326,11 +1375,21 @@ proc repr*(n: Node, indent: int = 0): string =
   # ============================================================
   # STATEMENTS (WITH INDENTATION!)
   # ============================================================
-  of nkStmtList, nkStmtListExpr:
+  of nkStmtList:
     for i in 0..<n.len:
       if i > 0: result.add "\n"
       if n[i].kind != nkEmpty:
         result.add "  ".repeat(indent) & repr(n[i], indent)
+
+  of nkStmtListExpr:
+    # StmtListExpr is often used as an expression wrapper - render inline if single child
+    if n.len == 1:
+      result = repr(n[0], indent)
+    else:
+      for i in 0..<n.len:
+        if i > 0: result.add "\n"
+        if n[i].kind != nkEmpty:
+          result.add "  ".repeat(indent) & repr(n[i], indent)
   
   of nkAsgn, nkFastAsgn, nkSinkAsgn:
     if n.len >= 2:
@@ -1347,7 +1406,7 @@ proc repr*(n: Node, indent: int = 0): string =
   # ============================================================
   # PROCEDURE DEFINITIONS (WITH INDENTATION!)
   # ============================================================
-  of nkProcDef, nkFuncDef, nkMethodDef, nkConverterDef, nkIteratorDef:
+  of nkProcDef, nkFuncDef, nkMethodDef, nkConverterDef, nkIteratorDef, nkMacroDef, nkTemplateDef:
     if n.len >= 7:
       let keyword = case n.kind
         of nkProcDef: "proc"
@@ -1355,8 +1414,13 @@ proc repr*(n: Node, indent: int = 0): string =
         of nkMethodDef: "method"
         of nkConverterDef: "converter"
         of nkIteratorDef: "iterator"
+        of nkMacroDef: "macro"
+        of nkTemplateDef: "template"
         else: "proc"
       result = keyword & " " & repr(n[0], indent)
+      # Add generic params [T, U: Constraint] if present (index 2)
+      if n[2].kind != nkEmpty:
+        result.add repr(n[2], indent)
       if n[3].kind != nkEmpty:
         result.add repr(n[3], indent)
       # Add pragmas if present
@@ -1376,7 +1440,17 @@ proc repr*(n: Node, indent: int = 0): string =
     result.add ")"
     if n.len > 0 and n[0].kind != nkEmpty:
       result.add ": " & repr(n[0], indent)
-  
+
+  of nkGenericParams:
+    # Generic parameters: [T, U: Constraint, V]
+    result = "["
+    var first = true
+    for i in 0..<n.len:
+      if not first: result.add "; "
+      first = false
+      result.add repr(n[i], indent)
+    result.add "]"
+
   of nkIdentDefs, nkConstDef:
     if n.len >= 3:
       for i in 0..<n.len-2:
@@ -1394,30 +1468,102 @@ proc repr*(n: Node, indent: int = 0): string =
       of nkConstSection: "const"
       else: ""
     for i in 0..<n.len:
-      if i > 0: result.add "\n"
+      if i > 0: result.add "\n" & "  ".repeat(indent)
       result.add keyword & " " & repr(n[i], indent)
   
   # ============================================================
   # CONTROL FLOW (WITH INDENTATION!)
   # ============================================================
+  # of nkIfStmt, nkIfExpr:
+  #   for i in 0..<n.len:
+  #     if i > 0: result.add "\n" & "  ".repeat(indent)
+  #     let branch = n[i]
+  #     if branch.kind in {nkElifBranch, nkElifExpr}:
+  #       # First branch uses "if", subsequent use "elif"
+  #       let keyword = if i == 0: "if " else: "elif "
+  #       if branch.len >= 2:
+  #         result.add keyword & repr(branch[0], indent) & ":\n"
+  #         result.add repr(branch[1], indent + 1)
+  #     elif branch.kind in {nkElse, nkElseExpr}:
+  #       result.add "else:\n"
+  #       if branch.len >= 1:
+  #         result.add repr(branch[0], indent + 1)
   of nkIfStmt, nkIfExpr:
     for i in 0..<n.len:
-      if i == 0:
-        result.add "if "
-      result.add repr(n[i], indent)
-  
+      if i > 0: result.add "\n" & "  ".repeat(indent)  # indent for elif/else lines
+      let branch = n[i]
+      if branch.kind in {nkElifBranch, nkElifExpr}:
+        let keyword = if i == 0: "if " else: "elif "
+        if branch.len >= 2:
+          result.add keyword & repr(branch[0], indent) & ":\n"
+          result.add repr(branch[1], indent + 1)
+      elif branch.kind in {nkElse, nkElseExpr}:
+        result.add "else:\n"
+        if branch.len >= 1:
+          result.add repr(branch[0], indent + 1)
+        else:
+          result.add "  ".repeat(indent + 1) & "discard"
+
+
+  of nkWhenStmt:
+    # Check if this is expression-style (ElifExpr/ElseExpr) or statement-style
+    var isExpr = false
+    if n.len > 0 and n[0].kind == nkElifExpr:
+      isExpr = true
+
+    if isExpr:
+      # Inline expression: when cond: a else: b
+      for i in 0..<n.len:
+        let branch = n[i]
+        if branch.kind == nkElifExpr:
+          let keyword = if i == 0: "when " else: " elif "
+          if branch.len >= 2:
+            result.add keyword & repr(branch[0], indent) & ": " & repr(branch[1], indent)
+        elif branch.kind == nkElseExpr:
+          result.add " else: "
+          if branch.len >= 1:
+            result.add repr(branch[0], indent)
+    else:
+      # Multi-line statement
+      for i in 0..<n.len:
+        if i > 0: result.add "\n" & "  ".repeat(indent)
+        let branch = n[i]
+        if branch.kind in {nkElifBranch, nkElifExpr}:
+          let keyword = if i == 0: "when " else: "elif "
+          if branch.len >= 2:
+            result.add keyword & repr(branch[0], indent) & ":\n"
+            result.add repr(branch[1], indent + 1)
+        elif branch.kind in {nkElse, nkElseExpr}:
+          result.add "else:\n"
+          if branch.len >= 1:
+            result.add repr(branch[0], indent + 1)
+
+  # of nkElifBranch, nkElifExpr:
+  #   # Standalone elif (when not inside nkIfStmt)
+  #   if n.len >= 2:
+  #     result = "elif " & repr(n[0], indent) & ":\n"
+  #     result.add repr(n[1], indent + 1)  # Indent body!
+
+  # of nkElse, nkElseExpr:
+  #   # Add indentation for case statement else branches
+  #   result = "  ".repeat(indent) & "else:\n"
+  #   if n.len >= 1:
+  #     result.add repr(n[0], indent + 1)  # Indent body!
+  #   else:
+  #     result.add "  ".repeat(indent + 1) & "discard"
   of nkElifBranch, nkElifExpr:
     if n.len >= 2:
-      result = "elif " & repr(n[0], indent) & ":\n"
-      result.add repr(n[1], indent + 1)  # Indent body!
-  
+      result = "  ".repeat(indent) & "elif " & repr(n[0], indent) & ":\n"
+      result.add repr(n[1], indent + 1)
+
   of nkElse, nkElseExpr:
-    result = "else:\n"
+    result = "  ".repeat(indent) & "else:\n"
     if n.len >= 1:
-      result.add repr(n[0], indent + 1)  # Indent body!
+      result.add repr(n[0], indent + 1)
     else:
       result.add "  ".repeat(indent + 1) & "discard"
-  
+
+
   of nkWhileStmt:
     if n.len >= 2:
       result = "while " & repr(n[0], indent) & ":\n"
@@ -1432,13 +1578,19 @@ proc repr*(n: Node, indent: int = 0): string =
       result.add " in " & repr(n[^2], indent) & ":\n"
       result.add repr(n[^1], indent + 1)  # Indent body!
   
+  # of nkCaseStmt:
+  #   if n.len > 0:
+  #     result = "case " & repr(n[0], indent) & ":"
+  #     for i in 1..<n.len:
+  #       result.add "\n"
+  #       result.add repr(n[i], indent)  # Branches handle their own indentation
   of nkCaseStmt:
     if n.len > 0:
       result = "case " & repr(n[0], indent) & ":"
       for i in 1..<n.len:
         result.add "\n"
-        result.add repr(n[i], indent)  # Branches handle their own indentation
-  
+        result.add repr(n[i], indent + 1)  # indent branches under case
+
   of nkOfBranch:
     if n.len >= 2:
       result = "  ".repeat(indent) & "of "
@@ -1478,7 +1630,17 @@ proc repr*(n: Node, indent: int = 0): string =
     result = "discard"
     if n.len > 0 and n[0].kind != nkEmpty:
       result.add " " & repr(n[0], indent)
-  
+
+  of nkDefer:
+    result = "defer:\n"
+    if n.len >= 1:
+      result.add repr(n[0], indent + 1)  # Indent body!
+
+  of nkRaiseStmt:
+    result = "raise"
+    if n.len > 0 and n[0].kind != nkEmpty:
+      result.add " " & repr(n[0], indent)
+
   # ============================================================
   # OBJECT CONSTRUCTION
   # ============================================================
@@ -1507,11 +1669,11 @@ proc repr*(n: Node, indent: int = 0): string =
   # PRAGMAS
   # ============================================================
   of nkPragma:
-    result = "{"
+    result = "{."
     for i in 0..<n.len:
       if i > 0: result.add ", "
       result.add repr(n[i], indent)
-    result.add "}"
+    result.add ".}"
   
   of nkPragmaExpr:
     if n.len >= 2:
@@ -1547,13 +1709,19 @@ proc repr*(n: Node, indent: int = 0): string =
       if i > 0: result.add "\n"
       result.add "  ".repeat(indent) & repr(n[i], indent)
   
+  # of nkRecCase:
+  #   if n.len >= 2:
+  #     result = "case " & repr(n[0], indent)
+  #     for i in 1..<n.len:
+  #       result.add "\n"
+  #       result.add repr(n[i], indent)
   of nkRecCase:
     if n.len >= 2:
       result = "case " & repr(n[0], indent)
       for i in 1..<n.len:
         result.add "\n"
-        result.add repr(n[i], indent)
-  
+        result.add repr(n[i], indent + 1)
+
   of nkRecWhen:
     if n.len >= 2:
       result = "when " & repr(n[0], indent) & ":\n"
@@ -1593,12 +1761,49 @@ proc repr*(n: Node, indent: int = 0): string =
       if i > 0: result.add ", "
       result.add repr(n[i], indent)
     result.add "]"
-  
+
+  of nkTupleClassTy:
+    # Type constraint "tuple" (matches any tuple)
+    result = "tuple"
+
+  of nkTypeClassTy:
+    # User-defined type class
+    if n.len > 0:
+      result = repr(n[0], indent)
+    else:
+      result = "typeclass"
+
+  of nkStaticTy:
+    # static[T] type
+    if n.len >= 1:
+      result = "static[" & repr(n[0], indent) & "]"
+    else:
+      result = "static"
+
   of nkProcTy:
     result = "proc"
     if n.len >= 1 and n[0].kind != nkEmpty:
       result.add repr(n[0], indent)
-  
+
+  of nkIteratorTy:
+    result = "iterator"
+    if n.len >= 1 and n[0].kind != nkEmpty:
+      result.add repr(n[0], indent)
+
+  of nkDistinctTy:
+    result = "distinct "
+    if n.len >= 1:
+      result.add repr(n[0], indent)
+
+  of nkConstTy:
+    # const T (rarely used directly)
+    if n.len >= 1:
+      result = repr(n[0], indent)
+
+  of nkOutTy:
+    if n.len >= 1:
+      result = "out " & repr(n[0], indent)
+
   # ============================================================
   # IMPORTS
   # ============================================================
@@ -1626,7 +1831,25 @@ proc repr*(n: Node, indent: int = 0): string =
     for i in 0..<n.len:
       if i > 0: result.add ", "
       result.add repr(n[i], indent)
-  
+
+  of nkImportExceptStmt:
+    if n.len >= 1:
+      result = "import " & repr(n[0], indent)
+      if n.len > 1:
+        result.add " except "
+        for i in 1..<n.len:
+          if i > 1: result.add ", "
+          result.add repr(n[i], indent)
+
+  of nkExportExceptStmt:
+    if n.len >= 1:
+      result = "export " & repr(n[0], indent)
+      if n.len > 1:
+        result.add " except "
+        for i in 1..<n.len:
+          if i > 1: result.add ", "
+          result.add repr(n[i], indent)
+
   # ============================================================
   # CONVERSIONS
   # ============================================================

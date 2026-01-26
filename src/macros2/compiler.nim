@@ -19,17 +19,20 @@ proc toNodeLineInfo(info: TLineInfo): NodeLineInfo =
 proc convertToNode(n: PNode): Node =
   ## Convert a compiler NimNode (PNode) to our Node structure
   ## Internal function - NOT exported
-  
+
   if n.isNil:
     return core.newNode(nkEmpty)
-  
+
   result = core.newNode(parseEnum[NodeKind]($n.kind))
   result.info = toNodeLineInfo(n.info)
-  
+
   # Convert based on node kind
   case n.kind
   of TNodeKind.nkStrLit..TNodeKind.nkTripleStrLit:
     result.strVal = n.strVal
+  of TNodeKind.nkCommentStmt:
+    # nkCommentStmt is in STR_LITERALS, has strVal not children
+    result.strVal = n.comment
   of TNodeKind.nkIdent:
     result.strVal = n.ident.s
   of TNodeKind.nkSym:

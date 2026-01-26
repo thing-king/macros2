@@ -32,7 +32,10 @@ proc cmdName*(n: Node): string =
     error("Expected a call or command node", n)
   else:
     expectMinLen(n, 1)
-    result = n[0].rightMost.strVal
+    let rightmost = n[0].rightMost
+    if rightmost.kind notin {nkIdent, nkSym}:
+      error("Expected identifier at rightmost position of command name, got " & $rightmost.kind, n)
+    result = rightmost.strVal
 
 proc whenCmd*(node: Node, name: string): bool =
   # echo "When CMD!"

@@ -4,3 +4,5 @@ test.nim
 _/
 .vscode
 CLAUDE.md
+nim.cfg
+*.predebug
