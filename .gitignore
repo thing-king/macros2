@@ -6,3 +6,7 @@ _/
 CLAUDE.md
 nim.cfg
 *.predebug
+.debug.summary
+.debug.trace
+.debug.compile.summary
+.debug.compile.trace

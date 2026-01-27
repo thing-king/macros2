@@ -9,7 +9,7 @@ macro error*(args: varargs[untyped]): untyped =
   # var strs: seq[string] = @[]
   # for a in args:
   #   strs.add(a.repr)
-  
+
 
   var error = macros.newTree(macros.nnkInfix,
     macros.ident("&"),

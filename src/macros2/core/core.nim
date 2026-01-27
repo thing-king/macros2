@@ -1036,7 +1036,7 @@ proc hasArgOfName*(params: Node; name: string): bool =
       if name.eqIdent($params[i][j]):
         return true
 
-proc addIdentIfAbsent*(dest: Node, ident: string) =
+proc addIdentIfAbsent*(dest: var Node, ident: string) =
   ## Add `ident` to `dest` if it is not present. This is intended for use
   ## with pragmas.
   for node in dest.children:
@@ -1250,6 +1250,7 @@ proc repr*(n: Node, indent: int = 0): string =
   ##   indent: Current indentation level (number of spaces)
 
   let ind = "  ".repeat(indent)  # Current line indentation
+  let indNext = "  ".repeat(indent + 1)  # Next line indentation
 
   case n.kind
   # ============================================================
@@ -1319,11 +1320,26 @@ proc repr*(n: Node, indent: int = 0): string =
   of nkCall:
     if n.len > 0:
       result = repr(n[0], indent)
-      result.add "("
-      for i in 1..<n.len:
-        if i > 1: result.add ", "
-        result.add repr(n[i], indent)
-      result.add ")"
+      # Check if last argument is a StmtList (from `do:` syntax)
+      let lastIdx = n.len - 1
+      let hasDoBlock = lastIdx >= 1 and n[lastIdx].kind == nkStmtList
+
+      if hasDoBlock:
+        # Render regular args in parens (if any), then `do:` block
+        if lastIdx > 1:
+          result.add "("
+          for i in 1..<lastIdx:
+            if i > 1: result.add ", "
+            result.add repr(n[i], indent)
+          result.add ")"
+        result.add " do:\n"
+        result.add repr(n[lastIdx], indent + 1)
+      else:
+        result.add "("
+        for i in 1..<n.len:
+          if i > 1: result.add ", "
+          result.add repr(n[i], indent)
+        result.add ")"
 
   of nkCommand:
     if n.len > 0:
@@ -1341,12 +1357,11 @@ proc repr*(n: Node, indent: int = 0): string =
   of nkBracketExpr:
     if n.len > 0:
       result = repr(n[0], indent)
-      if n.len > 1:
-        result.add "["
-        for i in 1..<n.len:
-          if i > 1: result.add ", "
-          result.add repr(n[i], indent)
-        result.add "]"
+      result.add "["
+      for i in 1..<n.len:
+        if i > 1: result.add ", "
+        result.add repr(n[i], indent)
+      result.add "]"
   
   # ============================================================
   # COLLECTIONS
@@ -1371,7 +1386,15 @@ proc repr*(n: Node, indent: int = 0): string =
       if i > 0: result.add ", "
       result.add repr(n[i], indent)
     result.add "}"
-  
+
+  of nkTableConstr:
+    # Table constructor: {key: val, key2: val2}
+    result = "{"
+    for i in 0..<n.len:
+      if i > 0: result.add ", "
+      result.add repr(n[i], indent)
+    result.add "}"
+
   # ============================================================
   # STATEMENTS (WITH INDENTATION!)
   # ============================================================
@@ -1381,10 +1404,15 @@ proc repr*(n: Node, indent: int = 0): string =
       if n[i].kind != nkEmpty:
         result.add "  ".repeat(indent) & repr(n[i], indent)
 
+
   of nkStmtListExpr:
-    # StmtListExpr is often used as an expression wrapper - render inline if single child
+    # StmtListExpr is often used as an expression wrapper
     if n.len == 1:
-      result = repr(n[0], indent)
+      # When wrapping control flow expressions, add parentheses (e.g., "(if cond: a else: b)")
+      if n[0].kind in {nkIfStmt, nkIfExpr, nkCaseStmt, nkWhenStmt}:
+        result = "(" & repr(n[0], indent) & ")"
+      else:
+        result = repr(n[0], indent)
     else:
       for i in 0..<n.len:
         if i > 0: result.add "\n"
@@ -1460,7 +1488,20 @@ proc repr*(n: Node, indent: int = 0): string =
         result.add ": " & repr(n[^2], indent)
       if n[^1].kind != nkEmpty:
         result.add " = " & repr(n[^1], indent)
-  
+
+  of nkVarTuple:
+    # Tuple unpacking: (a, b) = val or (a, b): Type = val
+    if n.len >= 2:
+      result = "("
+      for i in 0..<n.len-2:
+        if i > 0: result.add ", "
+        result.add repr(n[i], indent)
+      result.add ")"
+      if n[^2].kind != nkEmpty:
+        result.add ": " & repr(n[^2], indent)
+      if n[^1].kind != nkEmpty:
+        result.add " = " & repr(n[^1], indent)
+
   of nkVarSection, nkLetSection, nkConstSection:
     let keyword = case n.kind
       of nkVarSection: "var"
@@ -1488,86 +1529,123 @@ proc repr*(n: Node, indent: int = 0): string =
   #       result.add "else:\n"
   #       if branch.len >= 1:
   #         result.add repr(branch[0], indent + 1)
-  of nkIfStmt, nkIfExpr:
+  # of nkIfStmt, nkIfExpr:
+  #   # Check if this is expression-style (ElifExpr/ElseExpr) or statement-style
+  #   var isExpr = false
+  #   if n.len > 0 and n[0].kind == nkElifExpr:
+  #     isExpr = true
+
+  #   if isExpr:
+  #     # Inline expression: if cond: a else: b
+  #     for i in 0..<n.len:
+  #       let branch = n[i]
+  #       if branch.kind == nkElifExpr:
+  #         let keyword = if i == 0: "if " else: " elif "
+  #         if branch.len >= 2:
+  #           result.add keyword & repr(branch[0], indent) & ": " & repr(branch[1], indent)
+  #       elif branch.kind == nkElseExpr:
+  #         result.add " else: "
+  #         if branch.len >= 1:
+  #           result.add repr(branch[0], indent)
+  #   else:
+  #     # Multi-line statement
+  #     for i in 0..<n.len:
+  #       if i > 0: result.add "\n" & "  ".repeat(indent)  # indent for elif/else lines
+  #       let branch = n[i]
+  #       if branch.kind in {nkElifBranch, nkElifExpr}:
+  #         let keyword = if i == 0: "if " else: "elif "
+  #         if branch.len >= 2:
+  #           result.add keyword & repr(branch[0], indent) & ":\n"
+  #           result.add repr(branch[1], indent + 1)
+  #       elif branch.kind in {nkElse, nkElseExpr}:
+  #         result.add "else:\n"
+  #         if branch.len >= 1:
+  #           result.add repr(branch[0], indent + 1)
+  #         else:
+  #           result.add "  ".repeat(indent + 1) & "discard"
+  of nkIfExpr:
     for i in 0..<n.len:
-      if i > 0: result.add "\n" & "  ".repeat(indent)  # indent for elif/else lines
-      let branch = n[i]
-      if branch.kind in {nkElifBranch, nkElifExpr}:
-        let keyword = if i == 0: "if " else: "elif "
-        if branch.len >= 2:
-          result.add keyword & repr(branch[0], indent) & ":\n"
-          result.add repr(branch[1], indent + 1)
-      elif branch.kind in {nkElse, nkElseExpr}:
-        result.add "else:\n"
-        if branch.len >= 1:
-          result.add repr(branch[0], indent + 1)
+      let elifExpr = n[i]
+      if elifExpr.kind == nkElifExpr:
+        let keyword = if i == 0: "if " else: " elif "
+        if elifExpr.len >= 2:
+          result.add keyword & repr(elifExpr[0], indent) & ": " & repr(elifExpr[1], 0)
+      elif elifExpr.kind == nkElseExpr:
+        result.add " else: "
+        if elifExpr.len >= 1:
+          result.add repr(elifExpr[0], 0)
+  
+  of nkIfStmt:
+    for i in 0..<n.len:
+      let elifBranch = n[i]
+      if elifBranch.kind == nkElifBranch:
+        let keyword = if i == 0: "if " else: "\n" & "  ".repeat(indent) & "elif "
+        if elifBranch.len >= 2:
+          result.add keyword & repr(elifBranch[0], indent) & ":\n"
+          if elifBranch[1].kind != nkStmtList:
+            result.add indNext & repr(elifBranch[1], indent + 1)
+          else:
+            result.add repr(elifBranch[1], indent + 1)
+      elif elifBranch.kind == nkElse:
+        result.add "\n" & "  ".repeat(indent) & repr(elifBranch, indent)
+
+
+  of nkElifBranch, nkElifExpr:
+    if n.kind == nkElifBranch:
+      result = "elif " & repr(n[0], indent) & ":\n"
+      if n.len >= 2:
+        if n[1].kind != nkStmtList:
+          result.add indNext & repr(n[1], indent + 1)
         else:
-          result.add "  ".repeat(indent + 1) & "discard"
+          result.add repr(n[1], indent + 1)
+    else:
+      result = " elif " & repr(n[0], indent) & ": " & repr(n[1], indent)
+  of nkElse, nkElseExpr:
+    if n.kind == nkElse:
+      result.add "else:\n"
+      if n.len >= 1:
+        if n[0].kind != nkStmtList:
+          result.add indNext & repr(n[0], indent + 1)
+        else:
+          result.add repr(n[0], indent + 1)
+      else:
+        result.add "  ".repeat(indent + 1) & "discard"
+    else:
+      result.add " else: "
+      if n.len >= 1:
+        result.add repr(n[0], indent)
+
+
 
 
   of nkWhenStmt:
-    # Check if this is expression-style (ElifExpr/ElseExpr) or statement-style
-    var isExpr = false
-    if n.len > 0 and n[0].kind == nkElifExpr:
-      isExpr = true
-
-    if isExpr:
-      # Inline expression: when cond: a else: b
-      for i in 0..<n.len:
-        let branch = n[i]
-        if branch.kind == nkElifExpr:
-          let keyword = if i == 0: "when " else: " elif "
-          if branch.len >= 2:
-            result.add keyword & repr(branch[0], indent) & ": " & repr(branch[1], indent)
-        elif branch.kind == nkElseExpr:
-          result.add " else: "
-          if branch.len >= 1:
-            result.add repr(branch[0], indent)
-    else:
-      # Multi-line statement
-      for i in 0..<n.len:
-        if i > 0: result.add "\n" & "  ".repeat(indent)
-        let branch = n[i]
-        if branch.kind in {nkElifBranch, nkElifExpr}:
-          let keyword = if i == 0: "when " else: "elif "
-          if branch.len >= 2:
-            result.add keyword & repr(branch[0], indent) & ":\n"
+    # Multi-line statement
+    for i in 0..<n.len:
+      if i > 0: result.add "\n" & "  ".repeat(indent)
+      let branch = n[i]
+      if branch.kind in {nkElifBranch, nkElifExpr}:
+        let keyword = if i == 0: "when " else: "elif "
+        if branch.len >= 2:
+          result.add keyword & repr(branch[0], indent) & ":\n"
+          if branch[1].kind != nkStmtList:
+            result.add indNext & repr(branch[1], indent + 1)
+          else:
             result.add repr(branch[1], indent + 1)
-        elif branch.kind in {nkElse, nkElseExpr}:
-          result.add "else:\n"
-          if branch.len >= 1:
+      elif branch.kind in {nkElse, nkElseExpr}:
+        result.add "else:\n"
+        if branch.len >= 1:
+          if branch[0].kind != nkStmtList:
+            result.add indNext & repr(branch[0], indent + 1)
+          else:
             result.add repr(branch[0], indent + 1)
-
-  # of nkElifBranch, nkElifExpr:
-  #   # Standalone elif (when not inside nkIfStmt)
-  #   if n.len >= 2:
-  #     result = "elif " & repr(n[0], indent) & ":\n"
-  #     result.add repr(n[1], indent + 1)  # Indent body!
-
-  # of nkElse, nkElseExpr:
-  #   # Add indentation for case statement else branches
-  #   result = "  ".repeat(indent) & "else:\n"
-  #   if n.len >= 1:
-  #     result.add repr(n[0], indent + 1)  # Indent body!
-  #   else:
-  #     result.add "  ".repeat(indent + 1) & "discard"
-  of nkElifBranch, nkElifExpr:
-    if n.len >= 2:
-      result = "  ".repeat(indent) & "elif " & repr(n[0], indent) & ":\n"
-      result.add repr(n[1], indent + 1)
-
-  of nkElse, nkElseExpr:
-    result = "  ".repeat(indent) & "else:\n"
-    if n.len >= 1:
-      result.add repr(n[0], indent + 1)
-    else:
-      result.add "  ".repeat(indent + 1) & "discard"
-
 
   of nkWhileStmt:
     if n.len >= 2:
       result = "while " & repr(n[0], indent) & ":\n"
-      result.add repr(n[1], indent + 1)  # Indent body!
+      if n[1].kind != nkStmtList:
+        result.add indNext & repr(n[1], indent + 1)
+      else:
+        result.add repr(n[1], indent + 1)  # Indent body!
   
   of nkForStmt:
     if n.len >= 3:
@@ -1576,29 +1654,46 @@ proc repr*(n: Node, indent: int = 0): string =
         if i > 0: result.add ", "
         result.add repr(n[i], indent)
       result.add " in " & repr(n[^2], indent) & ":\n"
-      result.add repr(n[^1], indent + 1)  # Indent body!
-  
-  # of nkCaseStmt:
-  #   if n.len > 0:
-  #     result = "case " & repr(n[0], indent) & ":"
-  #     for i in 1..<n.len:
-  #       result.add "\n"
-  #       result.add repr(n[i], indent)  # Branches handle their own indentation
+      if n[^1].kind != nkStmtList:
+        result.add indNext & repr(n[^1], indent + 1)
+      else:
+        result.add repr(n[^1], indent + 1)  # Indent body!
+
   of nkCaseStmt:
     if n.len > 0:
       result = "case " & repr(n[0], indent) & ":"
       for i in 1..<n.len:
         result.add "\n"
-        result.add repr(n[i], indent + 1)  # indent branches under case
+        if n[i].kind == nkElse:
+          result.add ind & "else:\n"
+          if n[i].len >= 1:
+            if n[i][0].kind != nkStmtList:
+              result.add indNext & repr(n[i][0], indent + 1)
+            else:
+              result.add repr(n[i][0], indent + 1)  # indent body!
+        elif n[i].kind == nkElifBranch:
+          
+        else:
+          result.add repr(n[i], indent)  # indent branches under case
+
+        
 
   of nkOfBranch:
     if n.len >= 2:
-      result = "  ".repeat(indent) & "of "
+      result = ind & "of "
       for i in 0..<n.len-1:
         if i > 0: result.add ", "
         result.add repr(n[i], indent)
-      result.add ":\n"
-      result.add repr(n[^1], indent + 1)  # Indent body!
+      result.add ":"
+      # In object variants, NilLit means "discard" (empty branch)
+      if n[^1].kind == nkNilLit:
+        result.add " discard"
+      else:
+        result.add "\n"
+        if n[^1].kind != nkStmtList:
+          result.add indNext & repr(n[^1], indent + 1)
+        else:
+          result.add repr(n[^1], indent + 1)  # Indent body!
   
   of nkReturnStmt:
     result = "return"
@@ -1624,7 +1719,10 @@ proc repr*(n: Node, indent: int = 0): string =
       result.add " " & repr(n[0], indent)
     if n.len >= 2:
       result.add ":\n"
-      result.add repr(n[1], indent + 1)  # Indent body!
+      if n[1].kind != nkStmtList:
+        result.add indNext & repr(n[1], indent + 1)
+      else:
+        result.add repr(n[1], indent + 1)  # Indent body!
   
   of nkDiscardStmt:
     result = "discard"
@@ -1634,7 +1732,10 @@ proc repr*(n: Node, indent: int = 0): string =
   of nkDefer:
     result = "defer:\n"
     if n.len >= 1:
-      result.add repr(n[0], indent + 1)  # Indent body!
+      if n[0].kind != nkStmtList:
+        result.add indNext & repr(n[0], indent + 1)
+      else:
+        result.add repr(n[0], indent + 1)  # Indent body!
 
   of nkRaiseStmt:
     result = "raise"
@@ -1678,7 +1779,14 @@ proc repr*(n: Node, indent: int = 0): string =
   of nkPragmaExpr:
     if n.len >= 2:
       result = repr(n[0], indent) & " " & repr(n[1], indent)
-  
+
+  of nkPragmaBlock:
+    # {.pragma.}:
+    #   body
+    if n.len >= 2:
+      result = repr(n[0], indent) & ":\n"
+      result.add repr(n[1], indent + 1)
+
   # ============================================================
   # TYPE DEFINITIONS (WITH INDENTATION!)
   # ============================================================
@@ -1859,7 +1967,11 @@ proc repr*(n: Node, indent: int = 0): string =
   
   of nkCast:
     if n.len >= 2:
-      result = "cast[" & repr(n[0], indent) & "](" & repr(n[1], indent) & ")"
+      # cast[Type](val) or cast(pragma) when type is empty
+      if n[0].kind == nkEmpty:
+        result = "cast(" & repr(n[1], indent) & ")"
+      else:
+        result = "cast[" & repr(n[0], indent) & "](" & repr(n[1], indent) & ")"
   
   of nkAddr:
     if n.len >= 1:
@@ -1871,10 +1983,14 @@ proc repr*(n: Node, indent: int = 0): string =
   of nkTryStmt:
     if n.len > 0:
       result = "try:\n"
-      result.add repr(n[0], indent + 1)  # Indent body!
+      if n[0].kind != nkStmtList:
+        result.add indNext & repr(n[0], indent + 1)
+      else:
+        result.add repr(n[0], indent + 1)  # Indent body!
       for i in 1..<n.len:
         result.add "\n"
         result.add repr(n[i], indent)
+
   
   of nkExceptBranch:
     result = "  ".repeat(indent) & "except"
@@ -1884,7 +2000,10 @@ proc repr*(n: Node, indent: int = 0): string =
         else: result.add " "
         result.add repr(n[i], indent)
       result.add ":\n"
-      result.add repr(n[^1], indent + 1)  # Indent body!
+      if n[^1].kind != nkStmtList:
+        result.add indNext & repr(n[^1], indent + 1)
+      else:
+        result.add repr(n[^1], indent + 1)  # Indent body!
     elif n.len == 1:
       result.add ":\n"
       result.add repr(n[0], indent + 1)
@@ -1892,7 +2011,10 @@ proc repr*(n: Node, indent: int = 0): string =
   of nkFinally:
     if n.len >= 1:
       result = "  ".repeat(indent) & "finally:\n"
-      result.add repr(n[0], indent + 1)  # Indent body!
+      if n[0].kind != nkStmtList:
+        result.add indNext & repr(n[0], indent + 1)
+      else:
+        result.add repr(n[0], indent + 1)  # Indent body!
   
   # ============================================================
   # DEFAULT

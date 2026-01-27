@@ -54,14 +54,14 @@ proc parseStmt*(s: string): Node =
   ## Compiles the passed string to its AST representation.
   ## Expects one or more statements. Raises `ValueError` for parsing errors.
   ## Returns a Node (non-ref structure).
-  
+
   # parseString comes from the included core_converter
   # It returns a NimNode (which is PNode internally)
   let nimNode = parseString(s, cache, conf)
   # discard
   # # Convert to our Node structure
   result = convertToNode(nimNode)
-  
+
   # # Store the repr using the compiler's renderer
   # result.repr = repr(nimNode)
 

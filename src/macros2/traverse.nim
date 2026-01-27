@@ -6,13 +6,13 @@ import pkg/colors
 macro traverseNode*(nodeIdent, astBody, iteratorName, skipKinds: untyped, 
                 handler: untyped): untyped =
   let processNode = iteratorName
-  
+
   # Build the skip condition from the untyped node
   var skipCondition: NimNode
   if skipKinds.kind != nnkEmpty and skipKinds.kind != nnkNilLit:
     # Extract string literals and build a string set for comparison
     var kindStrings: seq[string] = @[]
-    
+
     case skipKinds.kind
     of nnkPrefix:
       if skipKinds[0].kind == nnkIdent and skipKinds[0].strVal == "@":
@@ -27,13 +27,13 @@ macro traverseNode*(nodeIdent, astBody, iteratorName, skipKinds: untyped,
           kindStrings.add(node.strVal)
     else:
       error("skipKinds must be a sequence literal", skipKinds)
-    
+
     if kindStrings.len > 0:
       # Build array literal for string comparison: $node.kind in ["nnkProcDef", "nnkFuncDef"]
       var kindArray = nnkBracket.newTree()
       for kindStr in kindStrings:
         kindArray.add(newStrLitNode(kindStr))
-      
+
       skipCondition = infix(
         nnkPrefix.newTree(ident("$"), nnkDotExpr.newTree(nodeIdent, ident("kind"))),
         "in",
@@ -43,7 +43,7 @@ macro traverseNode*(nodeIdent, astBody, iteratorName, skipKinds: untyped,
       skipCondition = newLit(false)
   else:
     skipCondition = newLit(false)
-  
+
   # Use genSym for unique identifiers
   let modifiedBodySym = genSym(nskVar, "modifiedBody")
   let iSym = genSym(nskForVar, "i")
@@ -51,7 +51,7 @@ macro traverseNode*(nodeIdent, astBody, iteratorName, skipKinds: untyped,
   let childSym = genSym(nskVar, "child")
   let iSym2 = genSym(nskForVar, "i")
   let originalNodeSym = genSym(nskLet, "originalNode")
-  
+
   # Manually construct the proc to avoid quote do: symbol binding issues
   let procBody = nnkStmtList.newTree(
     nnkIfStmt.newTree(
@@ -118,7 +118,7 @@ macro traverseNode*(nodeIdent, astBody, iteratorName, skipKinds: untyped,
       )
     )
   )
-  
+
   let procDef = nnkProcDef.newTree(
     processNode,
     newEmptyNode(),
@@ -135,7 +135,7 @@ macro traverseNode*(nodeIdent, astBody, iteratorName, skipKinds: untyped,
     newEmptyNode(),
     procBody
   )
-  
+
   result = nnkStmtList.newTree(
     procDef,
     nnkVarSection.newTree(

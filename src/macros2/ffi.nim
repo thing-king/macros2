@@ -19,7 +19,7 @@ macro exportMacro*(sym: typed): untyped =
 
   if typ.kind != nnkBracketExpr:
     error("exportMacro only works on proc names (idents)", sym)
-  
+
   let outputTyp = typ[1]
   proc isNimNodeType(n: NimNode): bool =
     if n.kind != nnkBracketExpr:

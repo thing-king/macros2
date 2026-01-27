@@ -55,7 +55,7 @@ proc getEndModule*(node: Node): Node =
   var currentNode = node
   if currentNode.kind == nkStmtList:
     currentNode = currentNode[0]
-  
+
   if currentNode.kind == nkIdent:
     return currentNode
   elif currentNode.kind == nkInfix:
