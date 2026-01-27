@@ -1672,7 +1672,13 @@ proc repr*(n: Node, indent: int = 0): string =
             else:
               result.add repr(n[i][0], indent + 1)  # indent body!
         elif n[i].kind == nkElifBranch:
-          
+          result.add ind & "elif "
+          if n[i].len >= 2:
+            result.add repr(n[i][0], indent) & ":\n"
+            if n[i][1].kind != nkStmtList:
+              result.add indNext & repr(n[i][1], indent + 1)
+            else:
+              result.add repr(n[i][1], indent + 1)  # indent body!
         else:
           result.add repr(n[i], indent)  # indent branches under case
 
